@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CS2 Major Pick'Em Predictor</title>
+<style>
+  :root {
+    --bg:#0f1419; --panel:#171e26; --panel2:#1e2731; --line:#2a3642;
+    --text:#e6edf3; --muted:#8b9aa8; --accent:#ffd34d; --green:#3fb950;
+    --red:#f85149; --blue:#58a6ff; --adv:#1f6feb33;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--panel); }
+  h1 { margin:0; font-size:18px; }
+  .sub { color:var(--muted); font-size:12px; margin-top:3px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px 24px 60px; }
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:18px; }
+  .controls .grp { display:flex; gap:6px; align-items:center; }
+  button { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    padding:7px 13px; border-radius:7px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--muted); }
+  button.active { background:var(--accent); color:#1a1a1a; border-color:var(--accent); font-weight:600; }
+  input, select { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:7px; padding:6px 8px; }
+  input { width:64px; }
+  .tagpill { display:inline-block; padding:1px 8px; border-radius:5px; font-size:11px;
+    margin-right:6px; background:var(--panel2); border:1px solid var(--line); }
+  label { color:var(--muted); font-size:12px; }
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card.primary { border-color:var(--accent); }
+  .card h3 { margin:0 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); }
+  .clear { font-size:26px; font-weight:700; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; margin-left:8px; }
+  .pill.ok { background:#23863633; color:var(--green); }
+  .pill.miss { background:#da363333; color:var(--red); }
+  .picks { margin-top:8px; font-size:12.5px; }
+  .picks .row { display:flex; gap:8px; margin:3px 0; }
+  .picks .tag { width:42px; color:var(--muted); flex:none; }
+  .chip { background:var(--panel2); border:1px solid var(--line); border-radius:6px;
+    padding:1px 7px; margin:1px 3px 1px 0; display:inline-block; font-size:12px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:10px; overflow:hidden; }
+  th,td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); font-size:13px; }
+  th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.3px; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.advRow td:first-child { box-shadow:inset 3px 0 var(--blue); }
+  .bar { height:7px; background:var(--panel2); border-radius:4px; overflow:hidden; min-width:60px; }
+  .bar > span { display:block; height:100%; background:var(--blue); }
+  .badge { font-size:10px; padding:1px 5px; border-radius:4px; margin-left:5px; font-weight:600; }
+  .b30 { background:#23863633; color:var(--green); }
+  .b03 { background:#da363333; color:var(--red); }
+  .badv { background:var(--adv); color:var(--blue); }
+  .dot { font-size:11px; }
+  .dot.hit { color:var(--green); } .dot.no { color:var(--muted); }
+  .legend { color:var(--muted); font-size:11.5px; margin:6px 2px 14px; }
+  .section-title { margin:24px 0 10px; font-size:15px; }
+  .loading { color:var(--muted); padding:20px; }
+  .bt { display:flex; gap:10px; flex-wrap:wrap; }
+  .bt .stage { background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:10px 14px; flex:1; min-width:180px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CS2 Major Pick'Em — Predictor &amp; Tracker</h1>
+  <div class="sub">Objective: maximize <b>P(clear the stage threshold)</b>, not expected correct picks. Ratings frozen at the Major start (no leakage).</div>
+</header>
+
+<div class="wrap">
+  <div class="controls">
+    <div class="grp"><label>major</label><select id="major"></select></div>
+    <div class="grp" id="stageBtns"></div>
+    <div class="grp"><label>threshold</label><input id="thr" type="number" value="5" min="1" max="10"></div>
+    <div class="grp"><label>sims</label><input id="sims" type="number" value="20000" min="1000" max="200000" step="1000" style="width:80px"></div>
+    <div class="grp"><label>model</label><select id="model">
+      <option value="flat">average-map (default)</option>
+      <option value="map_aware">map-aware (veto sim)</option>
+    </select></div>
+    <button id="go">Recompute</button>
+  </div>
+  <div id="meta" class="legend"></div>
+
+  <div id="cards" class="cards"></div>
+  <div class="legend">
+    Badges show the model's recommended slot — <span class="badge b30">3-0</span>
+    <span class="badge badv">ADV</span> <span class="badge b03">0-3</span>.
+    The ✓/· column shows the <b>actual</b> result for backtests.
+  </div>
+  <div id="table"></div>
+
+  <div id="vetoPanel" style="display:none">
+    <h2 class="section-title">Predicted veto &amp; map pool <span style="font-size:11px;color:var(--muted)">(map-aware model)</span></h2>
+    <div class="controls">
+      <div class="grp"><label>team A</label><select id="vetoA"></select></div>
+      <div class="grp"><label>team B</label><select id="vetoB"></select></div>
+      <div class="grp"><label>Bo</label><select id="vetoBo"><option value="3">Bo3</option><option value="1">Bo1</option></select></div>
+    </div>
+    <div id="vetoOut"></div>
+  </div>
+
+  <h2 class="section-title">Backtest across stages</h2>
+  <div id="bt" class="bt"><div class="loading">…</div></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let majors = [], curMajor = null, current = null;
+
+async function j(url){ const r = await fetch(url); return r.json(); }
+function pct(x){ return (x*100).toFixed(0)+'%'; }
+
+async function loadMajors(){
+  majors = await j('/api/majors');
+  const sel = $('#major');
+  sel.innerHTML = majors.map(m=>`<option value="${m.key}">${m.name}</option>`).join('');
+  sel.onchange = () => { setMajor(sel.value); render(); renderBacktest(); };
+  setMajor(majors[0].key);
+}
+function setMajor(key){
+  curMajor = majors.find(m=>m.key===key);
+  $('#major').value = key;
+  const box = $('#stageBtns');
+  box.innerHTML = '';
+  curMajor.stages.forEach(s => {
+    const b = document.createElement('button');
+    b.textContent = s.label;
+    b.dataset.tid = s.tournament_id;
+    b.onclick = () => { current = s.tournament_id; render(); markActive(); };
+    box.appendChild(b);
+  });
+  current = curMajor.stages[curMajor.stages.length-1].tournament_id; // default: latest stage
+  markActive();
+}
+function markActive(){
+  document.querySelectorAll('#stageBtns button').forEach(b =>
+    b.classList.toggle('active', +b.dataset.tid === current));
+}
+
+function recCard(r, primary){
+  const cleared = r.cleared===null ? '' :
+    `<span class="pill ${r.cleared?'ok':'miss'}">${r.cleared?'CLEARED':'MISSED'}</span>`;
+  const correct = r.correct===null ? '' : ` &nbsp;·&nbsp; scored <b>${r.correct}</b> correct`;
+  const title = r.strategy==='threshold' ? 'Threshold-optimal (recommended)' : 'Max-EV (chalk baseline)';
+  const chips = arr => arr.map(t=>`<span class="chip">${t}</span>`).join('');
+  return `<div class="card ${primary?'primary':''}">
+    <h3>${title}</h3>
+    <div class="clear">${pct(r.p_clear)} <span style="font-size:13px;color:var(--muted)">P(clear)</span> ${cleared}</div>
+    <div style="font-size:12px;color:var(--muted)">E[correct] = ${r.e_correct}${correct}</div>
+    <div class="picks">
+      <div class="row"><span class="tag">3-0</span><span>${chips(r.three_0)}</span></div>
+      <div class="row"><span class="tag">ADV</span><span>${chips(r.advance)}</span></div>
+      <div class="row"><span class="tag">0-3</span><span>${chips(r.zero_3)}</span></div>
+    </div></div>`;
+}
+
+function teamRow(t, showActual){
+  const badges = (t.rec_three_0?'<span class="badge b30">3-0</span>':'')
+    + (t.rec_advance?'<span class="badge badv">ADV</span>':'')
+    + (t.rec_zero_3?'<span class="badge b03">0-3</span>':'');
+  let act = '';
+  if (showActual){
+    const a = t.act_three_oh?'<span class="dot hit">3-0✓</span>'
+      : t.act_zero_three?'<span class="dot hit">0-3✓</span>'
+      : t.act_advanced?'<span class="dot hit">adv✓</span>'
+      : '<span class="dot no">out</span>';
+    act = a;
+  }
+  return `<tr class="${t.rec_advance||t.rec_three_0?'advRow':''}">
+    <td>${t.name}${badges}</td>
+    <td class="num">${t.rating}</td>
+    <td class="num">${pct(t.p_advance)}<div class="bar"><span style="width:${t.p_advance*100}%"></span></div></td>
+    <td class="num">${pct(t.p_3_0)}</td>
+    <td class="num">${pct(t.p_0_3)}</td>
+    ${showActual?`<td>${act}</td>`:''}
+  </tr>`;
+}
+
+async function render(){
+  $('#cards').innerHTML = '<div class="loading">Simulating… (first run for a stage builds ratings, ~a few seconds)</div>';
+  $('#table').innerHTML = ''; $('#meta').innerHTML = '';
+  const thr = $('#thr').value, sims = $('#sims').value, model = $('#model').value;
+  const d = await j(`/api/stage/${current}?major=${curMajor.key}&threshold=${thr}&sims=${sims}&model=${model}`);
+  const mode = d.has_actual ? '<span class="tagpill" style="color:var(--muted)">backtest (actual known)</span>'
+                            : '<span class="tagpill" style="color:var(--accent)">live prediction</span>';
+  const modelTag = d.model === 'map_aware'
+    ? '<span class="tagpill" style="color:var(--blue)">map-aware (veto sim)</span>'
+    : '<span class="tagpill">average-map model</span>';
+  $('#meta').innerHTML = `${mode}${modelTag}`
+    + `<span class="tagpill">${d.all_bo3 ? 'all Bo3' : 'mixed Bo1/Bo3'}</span>`
+    + `<span class="tagpill">${d.has_real_seeding ? 'real round-1 seeding' : 'rating-based seeding'}</span>`
+    + `<span class="tagpill">ratings frozen ${d.cutoff}</span>`
+    + `<span class="tagpill">${d.n_sims.toLocaleString()} sims</span>`;
+  setupVetoPanel(d);
+  const thrRec = d.recommendations.find(r=>r.strategy==='threshold');
+  const evRec  = d.recommendations.find(r=>r.strategy==='max_ev');
+  $('#cards').innerHTML = recCard(thrRec,true) + recCard(evRec,false);
+
+  const sa = d.has_actual;
+  $('#table').innerHTML = `<table><thead><tr>
+      <th>Team</th><th class="num">Rating</th><th class="num">P(advance)</th>
+      <th class="num">P(3-0)</th><th class="num">P(0-3)</th>${sa?'<th>Actual</th>':''}
+    </tr></thead><tbody>${d.teams.map(t=>teamRow(t,sa)).join('')}</tbody></table>`;
+}
+
+async function renderBacktest(){
+  const thr = $('#thr').value, sims = $('#sims').value;
+  const bt = await j(`/api/backtest?major=${curMajor.key}&threshold=${thr}&sims=${sims}`);
+  $('#bt').innerHTML = bt.map(s => {
+    const rows = s.recommendations.map(r=>{
+      const c = r.cleared===null?'' : `<span class="pill ${r.cleared?'ok':'miss'}">${r.cleared?'cleared':'missed'}</span>`;
+      const sc = r.correct===null?'—':r.correct;
+      return `<div style="display:flex;justify-content:space-between;margin:4px 0">
+        <span style="color:var(--muted)">${r.strategy}</span>
+        <span>${sc} correct ${c}</span></div>`;
+    }).join('');
+    return `<div class="stage"><b>${s.label}</b>${rows}</div>`;
+  }).join('');
+}
+
+function setupVetoPanel(d){
+  const panel = $('#vetoPanel');
+  if (d.model !== 'map_aware'){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const opts = d.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+  const A = $('#vetoA'), B = $('#vetoB');
+  const keepA = A.value, keepB = B.value;
+  A.innerHTML = opts; B.innerHTML = opts;
+  A.value = keepA || d.teams[0].id;
+  B.value = keepB || (d.teams[1] && d.teams[1].id) || d.teams[0].id;
+  A.onchange = B.onchange = $('#vetoBo').onchange = renderVeto;
+  renderVeto();
+}
+
+async function renderVeto(){
+  const a = $('#vetoA').value, b = $('#vetoB').value, bo = $('#vetoBo').value;
+  if (!a || !b || a===b){ $('#vetoOut').innerHTML = '<div class="legend">pick two different teams</div>'; return; }
+  const v = await j(`/api/veto/${current}?major=${curMajor.key}&a=${a}&b=${b}&bo=${bo}`);
+  const rows = v.maps.map(m=>{
+    const banned = m.played_pct < 0.10;
+    return `<tr${banned?' style="opacity:.5"':''}>
+      <td>${m.map}</td>
+      <td class="num">${pct(m.played_pct)}<div class="bar"><span style="width:${m.played_pct*100}%"></span></div></td>
+      <td class="num">${m.rating_a} v ${m.rating_b}</td>
+      <td class="num">${pct(m.p_a)}</td></tr>`;
+  }).join('');
+  $('#vetoOut').innerHTML =
+    `<div class="legend">P(${v.a.name} wins the Bo${v.bo} series) = <b>${pct(v.p_a_series)}</b>.
+       Maps dimmed are usually vetoed out (rarely played).</div>
+     <table><thead><tr><th>Map</th><th class="num">Played %</th>
+       <th class="num">${v.a.name} v ${v.b.name} (map rating)</th>
+       <th class="num">P(${v.a.name} wins map)</th></tr></thead>
+     <tbody>${rows}</tbody></table>`;
+}
+
+$('#model').onchange = () => { render(); };
+$('#go').onclick = () => { render(); renderBacktest(); };
+
+(async () => {
+  await loadMajors();
+  await render();
+  await renderBacktest();
+})();
+</script>
+</body>
+</html>

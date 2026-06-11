@@ -1,0 +1,33 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Local tooling / editor state (may capture secrets)
+.claude/
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Data
+*.db
+*.db-journal
+data/*.db
+backend/data/*.db
+
+# Node / frontend
+node_modules/
+.next/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
