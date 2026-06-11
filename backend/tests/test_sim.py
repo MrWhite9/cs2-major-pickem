@@ -67,6 +67,38 @@ def test_swiss_is_deterministic_with_seed():
     assert a.advanced == b.advanced and a.three_oh == b.three_oh
 
 
+def test_played_results_are_respected():
+    """Conditioning: a completed matchup always resolves to its real winner."""
+    field = _equal_field()
+    # force team 1 to have beaten team 9 and team 2 to have beaten team 10
+    played = [(1, 9), (2, 10)]
+    rng = random.Random(5)
+    for _ in range(300):
+        res = simulate_stage(field, rng, round1_pairs=list(zip(range(1, 9), range(9, 17))),
+                             played=played)
+        # the conditioned losers can never finish 3-0; winners can never finish 0-3
+        assert 9 not in res.three_oh and 10 not in res.three_oh
+        assert 1 not in res.zero_three and 2 not in res.zero_three
+        # every team still finishes 3W xor 3L
+        for t, (w, l) in res.record.items():
+            assert (w == 3) != (l == 3)
+
+
+def test_full_conditioning_is_deterministic():
+    """If every match is pre-decided, the stage outcome is fixed regardless of rng."""
+    field = _equal_field(4)  # 4-team toy Swiss: 2 advance, 2 out
+    # R1: 1>3, 2>4 -> 1,2 at 1-0 and 3,4 at 0-1
+    # R2: 1>2 (1 advances 2-0), 3>4 (4 out 0-2); 2 and 3 both 1-1
+    # R3: 2>3 -> 2 advances, 3 out.  Every match pre-decided -> fixed outcome.
+    played = [(1, 3), (2, 4), (1, 2), (3, 4), (2, 3)]
+    a = simulate_stage(field, random.Random(1), advance_at=2, eliminate_at=2,
+                       round1_pairs=[(1, 3), (2, 4)], played=played)
+    b = simulate_stage(field, random.Random(999), advance_at=2, eliminate_at=2,
+                       round1_pairs=[(1, 3), (2, 4)], played=played)
+    assert a.advanced == b.advanced == frozenset({1, 2})
+    assert a.eliminated == b.eliminated == frozenset({3, 4})
+
+
 def test_strong_seeds_advance_more_often():
     field = [Participant(team_id=i, seed=i,
                          rating=Rating(1900 - (i - 1) * 50, 50))

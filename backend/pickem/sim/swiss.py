@@ -63,7 +63,8 @@ def simulate_stage(participants: list[Participant], rng: random.Random,
                    advance_at: int = 3, eliminate_at: int = 3,
                    round1_pairs: list[tuple[int, int]] | None = None,
                    all_bo3: bool = False,
-                   series_prob: SeriesProb | None = None) -> StageResult:
+                   series_prob: SeriesProb | None = None,
+                   played: list[tuple[int, int]] | None = None) -> StageResult:
     """Simulate one Swiss stage.
 
     round1_pairs: real opening-round matchups (overrides seed-based pairing) --
@@ -72,7 +73,13 @@ def simulate_stage(participants: list[Participant], rng: random.Random,
         the Bo1 opening/middle rounds) instead of the Bo1-until-2W/2L rule.
     series_prob: optional map-aware P(a beats b, n_games). When given it replaces
         the average-map win_probability+Bo formula (the map-aware model, P3).
+    played: completed matches as (winner_id, loser_id). When the Buchholz pairing
+        re-derives one of these matchups it is resolved deterministically instead
+        of simulated -- this conditions the run on results so far (live tracking).
     """
+    known: dict[frozenset[int], int] = {}
+    if played:
+        known = {frozenset((w, l)): w for w, l in played}
     wins = {p.team_id: 0 for p in participants}
     losses = {p.team_id: 0 for p in participants}
     opponents: dict[int, set[int]] = {p.team_id: set() for p in participants}
@@ -109,15 +116,16 @@ def simulate_stage(participants: list[Participant], rng: random.Random,
                 pairs.extend(group_pairs)
 
         for a, b in pairs:
-            n_games = 3 if all_bo3 else bo_for((wins[a], losses[a]), (wins[b], losses[b]))
-            if series_prob is not None:
-                p_series = series_prob(a, b, n_games)
+            res = known.get(frozenset((a, b)))
+            if res is not None:
+                winner, loser = (a, b) if res == a else (b, a)
             else:
-                p_series = series_win_prob(win_probability(rating[a], rating[b]), n_games)
-            if rng.random() < p_series:
-                winner, loser = a, b
-            else:
-                winner, loser = b, a
+                n_games = 3 if all_bo3 else bo_for((wins[a], losses[a]), (wins[b], losses[b]))
+                if series_prob is not None:
+                    p_series = series_prob(a, b, n_games)
+                else:
+                    p_series = series_win_prob(win_probability(rating[a], rating[b]), n_games)
+                winner, loser = (a, b) if rng.random() < p_series else (b, a)
             wins[winner] += 1
             losses[loser] += 1
             opponents[a].add(b)

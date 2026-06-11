@@ -26,7 +26,8 @@ class SimSummary:
 def run(participants: list[Participant], n: int = 50000,
         seed: int | None = 0,
         round1_pairs: list[tuple[int, int]] | None = None,
-        all_bo3: bool = False, series_prob=None) -> SimSummary:
+        all_bo3: bool = False, series_prob=None,
+        played: list[tuple[int, int]] | None = None) -> SimSummary:
     rng = random.Random(seed)
     ids = [p.team_id for p in participants]
     adv = {i: 0 for i in ids}
@@ -37,7 +38,7 @@ def run(participants: list[Participant], n: int = 50000,
     for _ in range(n):
         r: StageResult = simulate_stage(participants, rng,
                                         round1_pairs=round1_pairs, all_bo3=all_bo3,
-                                        series_prob=series_prob)
+                                        series_prob=series_prob, played=played)
         for t in r.advanced:
             adv[t] += 1
         for t in r.three_oh:
@@ -82,6 +83,24 @@ def stage_participants(conn: sqlite3.Connection, tournament_id: int,
         seeds = {tid: i + 1 for i, tid in enumerate(order)}
 
     return [Participant(tid, seeds[tid], rated[tid]) for tid in team_ids]
+
+
+def played_results(conn: sqlite3.Connection, tournament_id: int
+                   ) -> list[tuple[int, int]]:
+    """Completed matches in a stage as (winner_id, loser_id) for live conditioning."""
+    rows = conn.execute(
+        """SELECT team_a_id a, team_b_id b, winner_id w FROM matches
+           WHERE tournament_id = ? AND status = 'finished'
+             AND winner_id IS NOT NULL AND team_a_id IS NOT NULL
+             AND team_b_id IS NOT NULL""",
+        (tournament_id,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        w = r["w"]
+        loser = r["b"] if w == r["a"] else r["a"]
+        out.append((w, loser))
+    return out
 
 
 def _tournament_team_ids(conn: sqlite3.Connection, tournament_id: int) -> list[int]:

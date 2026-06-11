@@ -20,7 +20,7 @@ from ..optimize.format import PickemFormat, score
 from ..optimize.optimizer import StageOptimizer
 from ..ratings.build import build_ratings
 from ..ratings.mapname import build_map_ratings
-from ..sim.montecarlo import run, stage_participants
+from ..sim.montecarlo import played_results, run, stage_participants
 from ..sim.veto import build_series_matrices
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2].parent / "frontend"
@@ -74,18 +74,32 @@ def _series_prob(major_key: str, tid: int):
     return sp
 
 
+def _played_sig(conn, tid: int) -> str:
+    """Signature of finished matches so the payload cache refreshes as results land."""
+    rows = conn.execute(
+        "SELECT id, winner_id FROM matches WHERE tournament_id = ? "
+        "AND status = 'finished' AND winner_id IS NOT NULL ORDER BY id",
+        (tid,),
+    ).fetchall()
+    return ";".join(f"{r['id']}:{r['winner_id']}" for r in rows)
+
+
 @lru_cache(maxsize=128)
 def _stage_payload(major_key: str, tid: int, threshold: int, n_sims: int,
-                   model: str = "flat") -> dict:
+                   model: str = "flat", played_sig: str = "",
+                   condition: bool = True) -> dict:
     spec = _stage_by_tid(major_key, tid)
     _ensure_ratings(spec.cutoff)
     conn = connect()
     fmt = PickemFormat(threshold=threshold)
     all_bo3, round1 = stage_format(conn, tid)
     parts = stage_participants(conn, tid, spec.cutoff, system=RATING_SYSTEM)
+    # Live conditioning on results so far -- but never for backtests, which must
+    # measure the from-cutoff prediction against the (already complete) outcome.
+    played = played_results(conn, tid) if condition else []
     series_prob = _series_prob(major_key, tid) if model == "map_aware" else None
     summary = run(parts, n=n_sims, seed=1, round1_pairs=round1, all_bo3=all_bo3,
-                  series_prob=series_prob)
+                  series_prob=series_prob, played=played)
     team_ids = [p.team_id for p in parts]
     opt = StageOptimizer(summary, team_ids, fmt)
     thr = opt.optimize(seed=1)
@@ -94,10 +108,15 @@ def _stage_payload(major_key: str, tid: int, threshold: int, n_sims: int,
     has_actual = bool(actual.advanced)
 
     rating = {p.team_id: p.rating for p in parts}
+    record = {p.team_id: [0, 0] for p in parts}
+    for w, l in played:
+        record[w][0] += 1
+        record[l][1] += 1
     teams = []
     for t in team_ids:
         teams.append({
             "id": t, "name": _name(conn, t), "rating": round(rating[t].rating),
+            "record": f"{record[t][0]}-{record[t][1]}",
             "p_advance": round(summary.p_advance[t], 4),
             "p_3_0": round(summary.p_3_0[t], 4),
             "p_0_3": round(summary.p_0_3[t], 4),
@@ -127,7 +146,7 @@ def _stage_payload(major_key: str, tid: int, threshold: int, n_sims: int,
         "major": major_key, "tournament_id": tid, "label": spec.label,
         "cutoff": spec.cutoff, "threshold": threshold, "n_picks": fmt.n_picks,
         "n_sims": n_sims, "all_bo3": all_bo3, "has_real_seeding": round1 is not None,
-        "model": model,
+        "model": model, "n_played": len(played),
         "has_actual": has_actual, "teams": teams,
         "recommendations": [rec_block(thr), rec_block(ev)],
         "actual": {
@@ -152,7 +171,10 @@ def majors():
 def stage(tid: int, major: str = DEFAULT_MAJOR, threshold: int = 5,
           sims: int = Query(20000, ge=1000, le=200000),
           model: str = Query("flat", pattern="^(flat|map_aware)$")):
-    return _stage_payload(major, tid, threshold, sims, model)
+    conn = connect()
+    sig = _played_sig(conn, tid)
+    conn.close()
+    return _stage_payload(major, tid, threshold, sims, model, sig)
 
 
 @app.get("/api/veto/{tid}")
@@ -195,7 +217,8 @@ def backtest(major: str = DEFAULT_MAJOR, threshold: int = 5,
         raise HTTPException(404, f"unknown major: {major}")
     out = []
     for s in m.stages:
-        p = _stage_payload(major, s.tournament_id, threshold, sims)
+        p = _stage_payload(major, s.tournament_id, threshold, sims,
+                           condition=False)
         out.append({
             "label": s.label, "has_actual": p["has_actual"],
             "recommendations": [
