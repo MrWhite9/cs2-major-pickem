@@ -5,6 +5,26 @@ stage's threshold** (keep/upgrade the event coin), not to maximize total correct
 picks — so the optimizer maximizes `P(correct picks >= threshold)`, a
 variance/correlation-aware objective rather than expected value.
 
+## Current pick — IEM Cologne 2026, Stage 3
+
+Threshold-optimal Pick'Em from the default model, ratings frozen **2026-06-11**
+(all-Bo3 stage, real round-1 seeding, 50k sims). Modeled **P(clear ≥ 5/10) ≈ 77%**,
+E[correct] ≈ 5.3.
+
+| Slot | Picks |
+| --- | --- |
+| **3-0** | Legacy, TheMongolz |
+| **Advance** | Vitality, Spirit, Team Falcons, MOUZ, Natus Vincere, FURIA |
+| **0-3** | B8, Monte |
+
+Top simulated probabilities: Vitality 98% advance / 62% 3-0, Spirit 92% / 39%,
+Falcons 78% / 23%, MOUZ 67% / 15%. Note the optimizer deliberately places the
+strongest teams in **advance** slots (near-certain to score) and treats the
+**3-0** slots as higher-variance lottery tickets — because it maximizes
+`P(clear the threshold)`, not expected correct picks. A map-aware veto-simulation
+model is also available in the dashboard as a toggle (counter-pick aware), but the
+average-map model remains the default pending a larger backtest.
+
 ## Approach
 
 1. **Data** — pull match history, brackets, and results from the PandaScore API
